@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { RelayStatus } from '../types.ts';
-  import { relayHost, relayState, relayTone, syncedAt } from '../relay-summary.ts';
+  import { ageRejectionDetail, rejectedForAge, relayHost, relayState, relayTone, syncedAt } from '../relay-summary.ts';
 
   let { relays }: { relays: RelayStatus[] } = $props();
 
@@ -9,7 +9,7 @@
   const detail = (relay: RelayStatus) =>
     relay.retryAt
       ? 'Retry after ' + new Date(relay.retryAt).toLocaleTimeString([], { timeStyle: 'short' })
-      : relay.detail && ['retry', 'error', 'partial'].includes(relay.phase)
+      : relay.detail && !rejectedForAge(relay.detail) && ['retry', 'error', 'partial'].includes(relay.phase)
         ? relay.detail
         : '';
 </script>
@@ -17,6 +17,7 @@
 <ul id="reports" class="relayRows" aria-label="Relay status">
   {#each relays as relay (relay.url)}
     {@const total = relay.sent + relay.present + relay.pending}
+    {@const ageDetail = ageRejectionDetail(relay)}
     <li class="relayRow {relayTone(relay)}">
       <div>
         <strong title={relay.url}>{relayHost(relay.url)}</strong>
@@ -25,12 +26,13 @@
       <div>
         <span class="relayState">{relayState(relay)}</span>
         {#if detail(relay)}<small>{detail(relay)}</small>{/if}
-        {#if relay.lastSyncedAt}<small>Synced {syncedAt(relay.lastSyncedAt)}</small>{/if}
+        {#if ageDetail}<small>{ageDetail}</small>{/if}
+        {#if relay.lastSyncedAt}<small>Last download check {syncedAt(relay.lastSyncedAt)}</small>{/if}
       </div>
       <div class="relayCounts">
         {#if relay.imported}<small>{relay.imported.toLocaleString()} downloaded</small>{/if}
         {#if total}
-          <small>{relay.sent.toLocaleString()} sent · {relay.pending.toLocaleString()} queued</small>
+          <small>{relay.sent.toLocaleString()} sent · {relay.pending.toLocaleString()} queued{ageDetail ? ' in total' : ''}</small>
           {#if relay.present}<small>{relay.present.toLocaleString()} already on relay</small>{/if}
           {#if relay.pending || relay.phase === 'broadcasting'}
             <progress

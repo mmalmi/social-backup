@@ -50,6 +50,14 @@ test('every relay failing keeps the reassurance that the backup is local', () =>
   });
 });
 
+test('an older stored timestamp refusal is distinguished from a relay cooldown', () => {
+  const tooOld = relay('wss://a.example', { phase: 'retry', detail: 'invalid: created_at too early', pending: 245 });
+  assert.equal(relayState(tooOld), 'Event too old for relay');
+  assert.match(onlineSummary([tooOld], 245, false).text, /rejected an event because of its original date/);
+  assert.equal(relayState({ ...tooOld, detail: 'network timeout' }), 'Will retry');
+  assert.equal(relayState({ ...tooOld, retryAt: Date.now() + 60000 }), 'Asked to wait');
+});
+
 test('waiting items, a running sync and no relays each say so', () => {
   assert.deepEqual(onlineSummary([relay('wss://a.example', { pending: 2, phase: 'idle' }), relay('wss://b.example')], 2, false), {
     tone: 'busy',

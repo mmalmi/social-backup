@@ -787,18 +787,10 @@ async function run() {
         progress.phase = 'connecting';
         await pool.ensureRelay(url, { connectionTimeout: 7000 });
       }
-      let delivered = { sent: 0, present: 0, failed: 0 };
-      const track = (state: { sent: number; present: number; failed: number; error?: string }) => {
-        progress.sent = delivered.sent + state.sent;
-        progress.present = delivered.present + state.present;
-        progress.failed = delivered.failed + state.failed;
-        if (state.error) progress.detail = state.error;
-      };
       if (fresh.length) {
         progress.phase = 'broadcasting';
-        const report = await deliverPending(db, url, fresh, settings, conf.pubkey, undefined, track);
+        const report = await deliverPending(db, url, fresh, settings, conf.pubkey, undefined, progress);
         if (report) messages.push(report);
-        delivered = { sent: progress.sent, present: progress.present, failed: progress.failed };
       }
       let imported: ImportResult | undefined;
       if (importing) {
@@ -823,8 +815,7 @@ async function run() {
       if (imported?.report) messages.push(imported.report);
       if (copies.length) {
         progress.phase = 'broadcasting';
-        delivered = { sent: progress.sent, present: progress.present, failed: progress.failed };
-        const report = await deliverPending(db, url, copies, settings, conf.pubkey, imported, track);
+        const report = await deliverPending(db, url, copies, settings, conf.pubkey, imported, progress);
         if (report) messages.push(report);
       }
       if (!changing && (await settings()).relays.includes(url)) {

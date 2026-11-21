@@ -26,6 +26,17 @@ export const syncedAt = (at: number) =>
 const items = (n: number) => n.toLocaleString() + (n === 1 ? ' item' : ' items');
 const failed = (relay: RelayStatus) => relay.phase === 'error' || relay.phase === 'retry';
 const list = (words: string[]) => new Intl.ListFormat('en', { type: 'conjunction' }).format(words);
+export const rejectedForAge = (message = '') =>
+  /\b(?:created_at too early|event (?:is )?too old)\b/i.test(message);
+
+export function ageRejectionDetail(relay: RelayStatus) {
+  if (!relay.ageRejections) return rejectedForAge(relay.detail) ? 'The relay declined an event because of its original date.' : '';
+  const { count, oldest } = relay.ageRejections;
+  const date = new Date(oldest * 1000).toLocaleDateString([], { dateStyle: 'medium', timeZone: 'UTC' });
+  return count === 1
+    ? `Rejected 1 event for age this sync. It was dated ${date}.`
+    : `Rejected ${count.toLocaleString()} events for age this sync. The oldest was dated ${date}.`;
+}
 
 export function relayTone(relay: RelayStatus): RelayTone {
   if (failed(relay)) return 'warn';
@@ -48,7 +59,8 @@ export function relayState(relay: RelayStatus) {
     case 'partial':
       return 'More to download';
     case 'retry':
-      return 'Asked to wait';
+      if (relay.retryAt) return 'Asked to wait';
+      return rejectedForAge(relay.detail) ? 'Event too old for relay' : 'Will retry';
     case 'error':
       return 'Failed';
     default:
@@ -60,13 +72,14 @@ export function relayState(relay: RelayStatus) {
 function reason(down: RelayStatus[]) {
   const [first] = down;
   if (down.length > 1) return 'Sync failed with ' + list(down.map((relay) => relayHost(relay.url))) + '.';
-  if (first.phase === 'retry')
+  if (first.phase === 'retry' && first.retryAt)
     return (
       relayHost(first.url) +
       ' asked to wait' +
-      (first.retryAt ? ' until ' + new Date(first.retryAt).toLocaleTimeString([], { timeStyle: 'short' }) : '') +
+      ' until ' + new Date(first.retryAt).toLocaleTimeString([], { timeStyle: 'short' }) +
       '.'
     );
+  if (rejectedForAge(first.detail)) return relayHost(first.url) + ' rejected an event because of its original date.';
   return 'Sync with ' + relayHost(first.url) + ' failed' + (first.detail ? ': ' + first.detail.replace(/\.$/, '') : '') + '.';
 }
 

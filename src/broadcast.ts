@@ -1,4 +1,4 @@
-import type { Archive, Delivery, Settings } from './types.ts';
+import { errorMessage, type Archive, type Delivery, type RelayProgress, type Settings } from './types.ts';
 import type { ImportResult } from './relays.ts';
 import { normalizeURL } from 'nostr-tools/utils';
 import { discardHistoryBody } from './event-history.ts';
@@ -6,7 +6,8 @@ import { PUBLIC_POST_KINDS } from './model.ts';
 import { pool, publish } from './relays.ts';
 import { compareEvents } from './reconcile.ts';
 import { canDeliverCapture } from './social.ts';
-import { drainRelayOutbox, RelayRateLimitError, type RelayDeliveryProgress } from 'nostr-pubsub';
+import { drainRelayOutbox, RelayRateLimitError } from 'nostr-pubsub';
+import { rejectedForAge } from './relay-summary.ts';
 
 export async function deliverPending(
   db: Archive,
@@ -15,10 +16,11 @@ export async function deliverPending(
   settings: () => Promise<Settings>,
   pubkey: string,
   imported?: ImportResult,
-  progress?: (state: RelayDeliveryProgress) => void,
+  progress?: RelayProgress,
 ) {
   // A kind-limited import cannot establish presence of the entire broadcast queue.
   const have = imported?.kinds ? undefined : imported?.have;
+  const previous = { ...progress };
   let mode = have ? 'Negentropy broadcast' : imported && !imported.have ? 'Direct broadcast' : undefined;
   const { sent, present, failed, error } = await drainRelayOutbox(url, rows, {
     async enabled(row) {
@@ -35,7 +37,15 @@ export async function deliverPending(
         if ('historySlot' in row && !await db.getKey('outbox', [row.id, url])) return;
         throw Error('Queued event is missing from the archive.');
       }
-      await publish(url, event);
+      try {
+        await publish(url, event);
+      } catch (error) {
+        if (progress && rejectedForAge(errorMessage(error))) {
+          const prior = progress.ageRejections;
+          progress.ageRejections = { count: (prior?.count ?? 0) + 1, oldest: Math.min(prior?.oldest ?? event.created_at, event.created_at) };
+        }
+        throw error;
+      }
     },
     async acknowledge(ids) {
       const tx = db.transaction(['outbox', 'events', 'meta', 'mediaRefs', 'heldEvents'], 'readwrite');
@@ -47,7 +57,13 @@ export async function deliverPending(
       await tx.done;
     },
     connected: () => !!pool.listConnectionStatus().get(normalizeURL(url)),
-    onProgress: progress,
+    onProgress(state) {
+      if (!progress) return;
+      progress.sent = (previous.sent ?? 0) + state.sent;
+      progress.present = (previous.present ?? 0) + state.present;
+      progress.failed = (previous.failed ?? 0) + state.failed;
+      if (state.error) progress.detail = state.error;
+    },
     async missing(batch) {
       if (have && imported) {
         return new Set(

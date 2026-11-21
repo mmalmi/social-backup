@@ -162,6 +162,7 @@ export interface RelayProgress {
   sent: number;
   present: number;
   failed: number;
+  ageRejections?: { count: number; oldest: number };
   detail?: string;
 }
 export interface RelayStatus extends RelayProgress {

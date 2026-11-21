@@ -13,7 +13,7 @@ output.parent.mkdir(exist_ok=True)
 
 inputs = ['package.json', 'pnpm-lock.yaml', 'tsconfig.json', 'LICENSE', 'src', 'test',
           'ui', 'scripts/build.ts', 'scripts/svelte.ts', 'scripts/test-release.ts', 'scripts/legacy-x-proofs.ts',
-          'website/release-site.mjs']
+          'scripts/build-site.ts', 'website/public/index.html', 'website/release-site.mjs']
 paths = run(['git', 'ls-files', '-z', '--', *inputs], cwd=root, check=True,
             capture_output=True).stdout.decode().split('\0')
 sources = {name: root / name for name in paths if name}

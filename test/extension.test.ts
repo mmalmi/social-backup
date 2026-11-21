@@ -50,6 +50,7 @@ interface FixtureRelay {
   reads: Filter[];
   withheld?: string;
   reject?: string;
+  rejectBefore?: number;
   negLimit?: string[];
   readLimit?: string[];
   publishLimit?: string[];
@@ -137,6 +138,8 @@ class Wire extends EventTarget {
         dest.sent.push(id);
         await dest.holdPublish;
         if (dest.publishLimit) return receive(['OK', id.id, false, ...dest.publishLimit]);
+        if (dest.rejectBefore && id.created_at < dest.rejectBefore)
+          return receive(['OK', id.id, false, 'invalid: created_at too early']);
         if (ok) dest.stored.set(id.id, id);
       }
       receive(['OK', id.id, ok, ok ? '' : 'blocked: temporary test failure']);
@@ -2480,6 +2483,36 @@ test('relay rows show live connections and acknowledgements while another relay 
   assert.equal(finished.lastRun!.relays![slow].sent, 2);
   await success('logout', { pubkey: owner });
   assert.deepEqual((await success('status')).relays, []);
+});
+
+test('relay rows count age rejections separately from other failed deliveries and show the oldest signed date', async t => {
+  const key = generateSecretKey(), owner = getPublicKey(key);
+  const url = 'wss://age-limit.example/';
+  const relay = fixtureRelay(url);
+  relay.rejectBefore = Date.UTC(2020, 0) / 1000;
+  await success('watch', { pubkey: owner });
+  await success('settings', { pubkey: owner, handle: '', capture: false, relaySync: false, relays: url });
+  await idle();
+  const db = await openArchive('nostr-backup-' + owner);
+  const events = [2013, 2014, 2023, 2024].map(year => finalizeEvent({
+    kind: 1, created_at: Date.UTC(year, 0) / 1000, tags: [], content: 'Archived event ' + year,
+  }, key));
+  relay.reject = events[2].id;
+  await append(db, events.map(event => ({ event })), owner);
+  db.close();
+  await success('broadcast');
+  await idle();
+  const row = (await success('status')).relays[0];
+  assert.equal(row.pending, 3);
+  assert.equal(row.sent, 1);
+  assert.deepEqual(row.ageRejections, { count: 2, oldest: events[0].created_at });
+  const page = await archivePage(t);
+  await until(() => pageElements(page)('reports').textContent.includes('2 events for age this sync'));
+  const text = pageElements(page)('reports').textContent;
+  assert.match(text, /oldest was dated .*2013/);
+  assert.match(text, /1 sent · 3 queued in total/);
+  assert.doesNotMatch(text, /Asked to wait/);
+  await success('logout', { pubkey: owner });
 });
 
 test('legacy single-account data reopens under its original identity after logout', async () => {
